@@ -1,0 +1,7 @@
+langchain
+langchain-community
+langchain-core
+langchain-nvidia-ai-endpoints
+neo4j
+pydantic
+typing-extensions
