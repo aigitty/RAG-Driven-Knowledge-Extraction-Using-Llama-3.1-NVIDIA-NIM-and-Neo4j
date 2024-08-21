@@ -17,9 +17,9 @@ from langchain_core.tools import tool
 from langchain.pydantic_v1 import BaseModel, Field
 
 # Set up environment variables
-NEO4J_URI = "bolt://35.175.233.136"
+NEO4J_URI = " "
 NEO4J_USERNAME = "neo4j"
-NEO4J_PASSWORD = "twirl-disassemblies-law"
+NEO4J_PASSWORD = " "
 
 
 os.environ["NEO4J_URI"] = NEO4J_URI
@@ -30,7 +30,7 @@ os.environ["NEO4J_PASSWORD"] = NEO4J_PASSWORD
 graph = Neo4jGraph(url=NEO4J_URI, username=NEO4J_USERNAME, password=NEO4J_PASSWORD)
 
 # Initialize the LLM (NVIDIA endpoint)
-os.environ["NVIDIA_API_KEY"] = "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"
+os.environ["NVIDIA_API_KEY"] = "nvapi-"
 llm = ChatNVIDIA(model="meta/llama-3.1-70b-instruct")
 
 # Neo4j Fulltext Index setup
