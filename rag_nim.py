@@ -17,9 +17,10 @@ from langchain_core.tools import tool
 from langchain.pydantic_v1 import BaseModel, Field
 
 # Set up environment variables
-NEO4J_URI = "bolt://35.172.231.141:7687"
+NEO4J_URI = "bolt://35.175.233.136"
 NEO4J_USERNAME = "neo4j"
-NEO4J_PASSWORD = "YOUR_PASSWORD"
+NEO4J_PASSWORD = "twirl-disassemblies-law"
+
 
 os.environ["NEO4J_URI"] = NEO4J_URI
 os.environ["NEO4J_USERNAME"] = NEO4J_USERNAME
@@ -29,7 +30,7 @@ os.environ["NEO4J_PASSWORD"] = NEO4J_PASSWORD
 graph = Neo4jGraph(url=NEO4J_URI, username=NEO4J_USERNAME, password=NEO4J_PASSWORD)
 
 # Initialize the LLM (NVIDIA endpoint)
-os.environ["NVIDIA_API_KEY"] = " YOUR_NVIDIA_KEY"
+os.environ["NVIDIA_API_KEY"] = "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"
 llm = ChatNVIDIA(model="meta/llama-3.1-70b-instruct")
 
 # Neo4j Fulltext Index setup
@@ -53,7 +54,7 @@ def get_candidates(input: str, type: str, limit: int = 3) -> List[Dict[str, str]
     candidates = graph.query(candidate_query, {"fulltextQuery": ft_query, "index": type, "limit": limit})
     return candidates
 
-
+@tool
 def get_side_effects(
     drug: Optional[str] = Field(description="Disease mentioned in the question. Return None if not mentioned."),
     min_age: Optional[int] = Field(description="Minimum age of the patient. Return None if not mentioned."),
@@ -98,7 +99,8 @@ def get_side_effects(
     LIMIT 10
     """
     data = graph.query(side_effects_base_query, params=params)
-    return data
+    return {"output": data}  # Ensure it returns data with "output" key
+
 
 
 # Streamlit app
@@ -161,7 +163,6 @@ st.markdown(
 
 
 
-# Set up the prompt template
 prompt = ChatPromptTemplate.from_messages(
     [
         ("system", "You are a helpful assistant that finds information about common side effects. "
@@ -172,12 +173,50 @@ prompt = ChatPromptTemplate.from_messages(
     ]
 )
 
+
 def _format_chat_history(chat_history: List[Tuple[str, str]]):
     buffer = []
     for human, ai in chat_history:
         buffer.append(HumanMessage(content=human))
         buffer.append(AIMessage(content=ai))
     return buffer
+
+tools = [get_side_effects]
+llm_with_tools = llm.bind_tools(tools=tools)
+
+agent = (
+    {
+        "input": lambda x: x["input"],
+        "chat_history": lambda x: _format_chat_history(x["chat_history"])
+        if x.get("chat_history")
+        else [],
+        "agent_scratchpad": lambda x: format_to_openai_function_messages(
+            x["intermediate_steps"]
+        ),
+    }
+    | prompt
+    | llm_with_tools
+    | OpenAIToolsAgentOutputParser()
+)
+
+
+# Add typing for input
+class AgentInput(BaseModel):
+    input: str
+    chat_history: List[Tuple[str, str]] = Field(
+        ..., extra={"widget": {"type": "chat", "input": "input", "output": "output"}}
+    )
+
+
+class Output(BaseModel):
+    output: Any
+
+
+agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True).with_types(
+    input_type=AgentInput, output_type=Output
+)
+
+
 
 st.title("💊 Drug Reporting System")
 st.write("Welcome! This application helps you find common side effects for drugs based on patient demographics.")
@@ -199,15 +238,24 @@ if st.button("Find Side Effects"):
         st.write(f"- Maximum Age: {max_age}")
         st.write(f"- Manufacturer: {input_manufacturer if input_manufacturer else 'Not specified'}")
 
-        # Get side effects data
-        side_effects = get_side_effects(drug=input_drug, min_age=min_age, max_age=max_age, manufacturer=input_manufacturer)
+        # Get user input
+        user_input = AgentInput(input=f"Find side effects for {input_drug}, min_age: {min_age}, max_age: {max_age}, manufacturer: {input_manufacturer}", chat_history=[])
 
-        if side_effects:
-            # Display the simplified output
-            side_effects_list = [effect['side_effect'] for effect in side_effects]
-            summary = f"Based on the information provided, the most common side effects of {input_drug} are:"
-            st.markdown(f"<div class='output-box'>{summary}<ul>" +
-                        "".join([f"<li>{side_effect}</li>" for side_effect in side_effects_list]) +
-                        "</ul></div>", unsafe_allow_html=True)
+        # Execute the agent
+        output = agent_executor.invoke({"input": user_input})
+
+
+        if output.get('output'):
+            side_effects = output['output']  # Get the output
+            
+            if isinstance(side_effects, list):
+                side_effects_list = [effect['side_effect'] for effect in side_effects if isinstance(effect, dict)]
+                summary = f"Based on the information provided, the most common side effects of {input_drug} are:"
+                st.markdown(f"<div class='output-box'>{summary}<ul>" +
+                    "".join([f"<li>{side_effect}</li>" for side_effect in side_effects_list]) +
+                    "</ul></div>", unsafe_allow_html=True)
+            else:
+                # Handle the case where side_effects is not a list (e.g., it's an error message)
+                st.markdown(f"<div class='output-box'>{side_effects}</div>", unsafe_allow_html=True)
         else:
             st.markdown("<div class='output-box'>No side effects found.</div>", unsafe_allow_html=True)
